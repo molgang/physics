@@ -57,6 +57,30 @@ De impliciete (Gauss-Seidel) diffusie is onvoorwaardelijk stabiel, zodat
 Bekende beperking: collocated 2dx-stencils zien checkerboard-divergentie
 niet (standaard Stam-artefact); irrelevant voor gladde velden, zie test 2.
 
+## Level 1 — Si-afvloei (ultrasound 28 + 40 kHz)
+
+`ultrasound.py` + `test_ultrasound.py` (24 checks). De bak krijgt een
+transducer-ring met een tweekanaals generator (28/40 kHz). Doel: de
+Si-rijke lichte fractie (15% van de vaste stof) uit het slib laten
+**afvloeien** over de overlooprand.
+
+- **Cavitatie-poort:** het level start op 62 massa-% (φ > 0,30) — te dik;
+  cavitatie is dood tot de speler met de slang verdunt
+  (η-venster ≤ ~5 mPa·s vol effect, dood ≥ 50 mPa·s; solids-demping tot
+  φ = 0,30). Dit zijn de "juiste viscositeitsparameters".
+- **Twee frequenties nodig:** 28 kHz de-aggregeert de grove clusters,
+  40 kHz de fijne (10% kruiseffect) — één kanaal plateaut, dual bevrijdt
+  >1,25× het beste enkele kanaal (bewezen in de suite).
+- **Sono-flotatie:** cavitatiebellen hechten aan vrije lichte deeltjes →
+  froth-laag. Zacht roeren (≤ ~120 RPM) voert de froth aan; hard roeren
+  onthecht de bellen (detachment) en mengt de froth terug.
+- **Afvloeien:** froth verlaat de bak boven de overlooprand (92% van
+  20 L) — bijvullen met de slang is deel van de puzzel. Afgevangen massa
+  wordt afgeboekt op de slak-boekhouding (massabalans gesloten).
+- **Score:** ★ ≥ 40% · ★★ ≥ 60% · ★★★ ≥ 75% én ≤ 0,040 kWh (generator
+  180 + 150 W loopt via de stopcontact-meter). Correct spel haalt ~95%
+  in 6 min ≈ 33 Wh (3★).
+
 ## AR-mapping (Quest 3S viscositeitsruimte)
 
 | Python-API | AR-interactie |

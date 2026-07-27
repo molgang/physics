@@ -21,6 +21,7 @@ try:  # PIL gives a much faster canvas blit (paste); PPM path is fallback
 except ImportError:
     HAVE_PIL = False
 
+from ultrasound import SiliconWashLevel
 from viscosity_core import MixingTank
 
 SCALE = 5                       # canvas pixels per grid cell
@@ -37,6 +38,7 @@ class ViscosityApp:
         root.title("MOLGANG Viscositeitslab — staalslak-slib 5 µm")
         root.configure(bg="#0b0e13")
         self.tank = self._new_tank()
+        self.level = SiliconWashLevel(self.tank)
         self.mouse_splat = None
         self._last_mouse = None
         self._fps_t = time.perf_counter()
@@ -115,6 +117,26 @@ class ViscosityApp:
         self.status = self._lbl(p, "", 10, "#ffb454", bold=True)
         self.status.pack(anchor="w", pady=(2, 6))
 
+        self._lbl(p, "Level: Si-afvloei (ultrasound)", 10,
+                  bold=True).pack(anchor="w", pady=(4, 2))
+        lbtns = tk.Frame(p, bg="#0b0e13")
+        lbtns.pack(anchor="w")
+
+        def mklvl(col, text, cmd):
+            b = tk.Button(lbtns, text=text, command=cmd, width=9,
+                          bg="#1a2333", fg="#dbe6f5",
+                          activebackground="#263247", relief="flat")
+            b.grid(row=0, column=col, padx=2, pady=2)
+            return b
+
+        self.b_lvl = mklvl(0, "Start", self._level_start)
+        self.b_28 = mklvl(1, "28 kHz: uit", self._toggle_28)
+        self.b_40 = mklvl(2, "40 kHz: uit", self._toggle_40)
+        self.lvl_hint = self._lbl(p, "", 9, "#8fa2bd")
+        self.lvl_hint.pack(anchor="w")
+        self.lvl_stat = self._lbl(p, "", 9)
+        self.lvl_stat.pack(anchor="w", pady=(0, 4))
+
         self.rows = {}
         grid = tk.Frame(p, bg="#0b0e13")
         grid.pack(anchor="w", fill="x")
@@ -177,6 +199,28 @@ class ViscosityApp:
         self.tank.set_composition(float(self.s_w.get()), instant=True)
         self.tank.settle_bottom()
         self.tank.stirrer.rpm_set = float(rpm)
+        self.level = SiliconWashLevel(self.tank)
+        self.b_28.config(text="28 kHz: uit")
+        self.b_40.config(text="40 kHz: uit")
+
+    def _level_start(self):
+        self.level = SiliconWashLevel(self.tank)
+        self.level.bath.on_28 = False
+        self.level.bath.on_40 = False
+        self.b_28.config(text="28 kHz: uit")
+        self.b_40.config(text="40 kHz: uit")
+        self.level.start()
+        self._sync_w_slider()
+
+    def _toggle_28(self):
+        b = self.level.bath
+        b.on_28 = not b.on_28
+        self.b_28.config(text=f"28 kHz: {'AAN' if b.on_28 else 'uit'}")
+
+    def _toggle_40(self):
+        b = self.level.bath
+        b.on_40 = not b.on_40
+        self.b_40.config(text=f"40 kHz: {'AAN' if b.on_40 else 'uit'}")
 
     def _sync_w_slider(self):
         self._slider_guard = True
@@ -207,6 +251,9 @@ class ViscosityApp:
                + SLIB_RGB[None, None, :] * t[..., None])
         speed = np.hypot(g.u, g.v)
         rgb += np.clip(speed * 45.0, 0, 28)[..., None]
+        if self.level.active and self.level.froth > 1e-3:
+            a = min(0.5, self.level.froth * 0.30)   # froth layer on top
+            rgb = rgb * (1 - a) + np.array([232.0, 238.0, 244.0]) * a
         rgb[~g.liquid] = BG_RGB
         img = np.clip(rgb, 0, 255).astype(np.uint8)
         if HAVE_PIL:
@@ -295,16 +342,34 @@ class ViscosityApp:
         else:
             self.status.config(text="")
 
+    def _update_level_readouts(self):
+        lv = self.level
+        if not lv.active:
+            self.lvl_hint.config(text="Klik Start: was het silicium uit "
+                                      "het slib (28+40 kHz)")
+            self.lvl_stat.config(text="")
+            return
+        s = lv.snapshot()
+        stars = "★" * s["stars"] + "☆" * (3 - s["stars"])
+        self.lvl_stat.config(
+            text=f"{stars}  {s['captured_pct']:.0f}% Si afgevangen · "
+                 f"froth {s['froth_kg']:.2f} kg · cav {s['cav_eff']*100:.0f}% · "
+                 f"{s['energy_kwh']*1000:.1f} Wh",
+            fg="#38d39f" if s["stars"] >= 2 else "#dbe6f5")
+        self.lvl_hint.config(text=s["hint"])
+
     # -------------------------------------------------------------- loop --
     def _tick(self):
         t0 = time.perf_counter()
         self.tank.step(1.0 / 30.0, mouse_splat=self.mouse_splat)
+        self.level.step(1.0 / 30.0)
         self.mouse_splat = None
         self._frame = getattr(self, "_frame", 0) + 1
         if self._frame % 2 == 0:      # render at 15 Hz, physics at 30 Hz
             self._render()
         if self._frame % 4 == 0:      # readout labels at ~7 Hz
             self._update_readouts(self.tank.snapshot())
+            self._update_level_readouts()
         dt = time.perf_counter() - self._fps_t
         self._fps_t = time.perf_counter()
         self._fps = 0.9 * self._fps + 0.1 * (1.0 / max(dt, 1e-6))

@@ -8,8 +8,9 @@ Public API (pure Python + numpy; GUI is tkinter, stdlib):
   MixingTank      - the tank; owns solver, stirrer, meter; AR verb methods
 """
 
+from .ultrasound import SiliconWashLevel, UltrasoundBath
 from .viscosity_core import (FluidGrid2D, MixingTank, PowerMeter,
                              SlurryRheology, Stirrer)
 
-__all__ = ["FluidGrid2D", "MixingTank", "PowerMeter", "SlurryRheology",
-           "Stirrer"]
+__all__ = ["FluidGrid2D", "MixingTank", "PowerMeter", "SiliconWashLevel",
+           "SlurryRheology", "Stirrer", "UltrasoundBath"]
