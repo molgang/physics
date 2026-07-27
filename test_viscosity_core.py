@@ -10,8 +10,8 @@ import sys
 
 import numpy as np
 
-from viscosity_core import (FluidGrid2D, MixingTank, SlurryRheology, Stirrer,
-                            PHI_MAX, PHI_PACK_BED, RHO_SLAG, RHO_WATER)
+from viscosity_core import (FluidGrid2D, MixingTank, SlurryRheology, Stirrer, PHI_MAX,
+                            PHI_PACK_BED, RHO_SLAG, RHO_WATER)
 
 failures = 0
 
@@ -185,6 +185,15 @@ check(np.isfinite(t.grid.c).all(), "field finite after pour")
 t.set_composition(60.0)
 for _ in range(30):
     t.step(1 / 30)
+check(t.volume_l <= t.capacity_l + 1e-6,
+      f"set_composition drains water to respect capacity "
+      f"({t.volume_l:.1f} <= {t.capacity_l} L)")
+check(approx(t.w(), 0.60, 5e-3) or t.pour_queue_kg > 0,
+      f"slider up targets 60% (w={t.w()*100:.1f}%, queue "
+      f"{t.pour_queue_kg:.1f} kg)")
+t.set_composition(88.0, instant=True)
+check(t.volume_l <= t.capacity_l + 1e-6 and t.phi_bulk() > PHI_MAX,
+      f"88% fits in tank and is paste (phi={t.phi_bulk():.2f})")
 t.set_composition(10.0)
 check(approx(t.w(), 0.10, 5e-3), f"slider down -> w = {t.w()*100:.1f}%")
 check(t.meter.energy_kwh >= 0.0, "energy meter monotone")

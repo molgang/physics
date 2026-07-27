@@ -139,7 +139,9 @@ class ViscosityApp:
     def _on_w_slider(self, val):
         if self._slider_guard:
             return
-        self.tank.set_composition(float(val))
+        # Instant lab recomposition; the physical pour visual belongs to
+        # the "Stort" button, not the slider.
+        self.tank.set_composition(float(val), instant=True)
 
     def _on_rpm_slider(self, val):
         self.tank.stirrer.rpm_set = float(val)

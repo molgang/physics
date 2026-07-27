@@ -21,7 +21,7 @@
     "tripped": false,
     "settling_mm_h": 101.3701,
     "settle_boost": false,
-    "sim_fps": 33.2992
+    "sim_fps": 33.4225
   },
   "60pct": {
     "time_s": 12.0333,
@@ -30,7 +30,7 @@
     "rho_mix": 1734.6939,
     "eta_app_pa_s": 0.0091,
     "tau_yield_pa": 0.4504,
-    "volume_l": 20.1765,
+    "volume_l": 20.0,
     "re_impeller": 18278.9644,
     "regime": "turbulent",
     "rpm_set": 400.0,
@@ -45,7 +45,7 @@
     "tripped": false,
     "settling_mm_h": 8.7414,
     "settle_boost": false,
-    "sim_fps": 33.438
+    "sim_fps": 33.5119
   },
   "88pct": {
     "time_s": 12.0333,
@@ -54,7 +54,7 @@
     "rho_mix": 2639.7516,
     "eta_app_pa_s": 1000000.0,
     "tau_yield_pa": 70053315.8443,
-    "volume_l": 44.1961,
+    "volume_l": 20.0,
     "re_impeller": 0.0,
     "regime": "stil",
     "rpm_set": 400.0,
@@ -69,6 +69,6 @@
     "tripped": true,
     "settling_mm_h": 0.0,
     "settle_boost": true,
-    "sim_fps": 2589.0473
+    "sim_fps": 2504.7873
   }
 }

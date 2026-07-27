@@ -548,13 +548,26 @@ class MixingTank:
         return add
 
     def set_composition(self, w_pct, instant=False):
-        """Slider: set target solids mass fraction (lab mode)."""
+        """Slider: set target solids mass fraction (lab mode).
+
+        Capacity-aware: if the target composition cannot fit in the tank
+        with the current water, water is drained (instantly) first so the
+        tank never exceeds capacity_l.
+        """
         w = min(max(w_pct / 100.0, 0.0), 0.995)
         target_slag = self.water_kg * w / (1.0 - w)
+        vol_m3 = self.water_kg / RHO_WATER + target_slag / RHO_SLAG
+        cap_m3 = self.capacity_l / 1000.0
+        if vol_m3 > cap_m3:
+            denom = 1.0 / RHO_WATER + w / max((1.0 - w) * RHO_SLAG, 1e-9)
+            self.water_kg = cap_m3 / denom
+            target_slag = self.water_kg * w / (1.0 - w)
         delta = target_slag - (self.slag_kg + self.pour_queue_kg)
         if delta >= 0:
             if instant:
-                self.slag_kg += delta
+                # Collapse any pending pour into the instant recomposition.
+                self.slag_kg = target_slag
+                self.pour_queue_kg = 0.0
                 self._spread_uniform()
             else:
                 self.pour_queue_kg += delta
