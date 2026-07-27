@@ -97,3 +97,42 @@ Si-rijke lichte fractie (15% van de vaste stof) uit het slib laten
 
 De proof-suite (`test_viscosity_core.py`) is het parity-contract voor de
 port, zoals `lab3d/chemistry.test.mjs` dat is voor de chemie-engine.
+
+## Level 2 — Kreken & rivier-stroomdynamica (mijnbouw-aanvoer)
+
+`river_flow.py` + `test_river_flow.py` (18 checks). MOLGANG-016:
+kreken uit de bergen voeden de rivier bij elke staalfabriek-site met
+zichtbare stroomdynamica/viscositeit, en voeren erts-houdend sediment aan
+voor latere mijnbouw. Hergebruikt bewust `SlurryRheology`
+(Krieger-Dougherty + Richardson-Zaki bezinken) uit `viscosity_core.py` —
+geen tweede fysica-stack.
+
+- **Kanaalroutering, geen tank-solver:** een rivier is overwegend
+  eenrichtingsstroming over kilometers, geen geroerde tank. Daarom een
+  1D dieptegemiddelde kinematische-golf-oplosser (Manning-vergelijking,
+  expliciet, CFL-substepped) langs de al bestaande OSM-rivierpolylijn
+  per site, in plaats van de 2D Stam-solver van het viscositeitslab —
+  een bewuste, gedocumenteerde keuze (de juiste vereenvoudiging voor
+  een riviertak, geen shortcut).
+- **Viskeuze koppeling:** schijnbare viscositeit (via de bestaande
+  rheologie-klasse) verhoogt de effectieve Manning-ruwheid — dikkere
+  modder stroomt aantoonbaar trager bij gelijke afvoer.
+- **Placer-depositie:** erts bezinkt (Richardson-Zaki, hergebruikt)
+  vloeiend sneller waar de stroming vertraagt (bv. waar het kanaal
+  verbreedt) — geen harde snelheidsdrempel (die zou het aanvoermechanisme
+  na verloop van tijd laten "bevriezen" zodra de rivier een stabiele
+  snelle stroomsnelheid bereikt, ontdekt tijdens het bouwen van de
+  proof-suite en gefixt naar een vloeiende exponentiële demping).
+- **Gedeelde economie:** `RawMaterialSupply.collect()` betaalt in
+  hetzelfde MolCoin-schema als V2O5-verkoop/oogst (kg × €/kg) — geen
+  nieuwe, losstaande valuta (zelfde les als bij het tuintje).
+
+## AR-mapping (kreken/rivier)
+
+| Python-API | AR-interactie |
+|---|---|
+| `RiverChannel(pts_m, width_m)` | de al bestaande OSM-rivier per site, nu stromend |
+| `add_creek(Q, phi, at_fraction)` | een kreek die uit de bergen instroomt |
+| `step(dt)` | live stroomdynamica + viscositeit in de rivier |
+| `deposit_at(fraction)` | zichtbare erts-ophoping (zandbank) |
+| `RawMaterialSupply.collect()` | mijnbouw-actie: erts → MolCoins |
