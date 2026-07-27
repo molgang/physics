@@ -1,3 +1,9 @@
+> **Herkomst:** geëxtraheerd uit `febuz/molgang-web` se `simulation/viscosity_lab/`
+> (geschiedenis behouden via `git filter-repo`) als losstaande fysica-autoriteit,
+> zodat `molgang/webapp` en `molgang/world` 'm als git-submodule kunnen pinnen
+> zonder de handelsapp mee te slepen. Zie de MOLGANG-symbiosethesis voor de
+> volledige architectuurmotivatie.
+
 # MOLGANG Viscositeitslab
 
 Interactieve simulator van **roeren in staalslak-slib** (5 µm deeltjes,
