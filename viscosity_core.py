@@ -24,6 +24,7 @@ All comments/units SI unless noted. No pandas, no GUI imports here.
 
 from __future__ import annotations
 
+import copy
 import math
 import numpy as np
 
@@ -45,6 +46,18 @@ ETA_CAP = 1.0e6           # Pa.s numerical cap ("locked" paste)
 PHI_PACK_BED = 0.62       # local packing cap for settled sediment
 ELECTRICITY_EUR_PER_KWH = 0.30
 
+# --- thermal coupling (0-D bulk energy balance) -----------------------------
+T_REF_C = 20.0            # °C, reference of the rheology tables
+EA_OVER_R = 2400.0        # K, Arrhenius slope of water viscosity (20-60 °C)
+CP_WATER = 4180.0         # J/kg/K
+CP_SLAG = 800.0           # J/kg/K
+UA_TANK_W_PER_K = 2.3     # W/K, steel wall + free convection of the 0.4 m tank
+
+# --- thixotropy (structural breakdown/rebuild, opt-in) ----------------------
+C_THIX = 0.8              # max relative viscosity surplus at fully built gel
+T_BUILD_S = 45.0          # s, structural rebuild time constant at rest
+K_BREAK = 1.15e-3         # (1/s) per 1/s shear; lambda* ~ 0.15 at 300 rpm
+
 
 # ---------------------------------------------------------------------------
 # Rheology of the slag/water mixture
@@ -55,7 +68,7 @@ class SlurryRheology:
     def __init__(self, rho_solid=RHO_SLAG, rho_liquid=RHO_WATER,
                  eta_liquid=ETA_WATER, phi_max=PHI_MAX,
                  intrinsic=INTRINSIC_VISC, phi_yield=PHI_YIELD_ONSET,
-                 tau0=TAU0):
+                 tau0=TAU0, structural_factor=1.0):
         self.rho_solid = rho_solid
         self.rho_liquid = rho_liquid
         self.eta_liquid = eta_liquid
@@ -63,6 +76,26 @@ class SlurryRheology:
         self.intrinsic = intrinsic
         self.phi_yield = phi_yield
         self.tau0 = tau0
+        # Multiplier on the full flow curve, set by at_conditions(): carries
+        # the thixotropy surplus (and only that -- temperature scaling lives
+        # in eta_liquid). 1.0 keeps every table exact.
+        self.structural_factor = structural_factor
+
+    def at_conditions(self, t_c, structural=1.0):
+        """Copy of the rheology evaluated at slurry temperature t_c (°C).
+
+        Liquid viscosity follows an Arrhenius law anchored at T_REF_C (factor
+        1.0 exactly at 20 °C, ~0.6x at 40 °C); `structural` scales the whole
+        flow curve (thixotropy surplus). Always condition from the base
+        instance -- factors are not meant to compound.
+        """
+        out = copy.copy(self)
+        # eta ~ exp(E_a/R * 1/T): warm (T > T_ref) => factor < 1, dunner.
+        f = math.exp(EA_OVER_R * (1.0 / (t_c + 273.15)
+                                  - 1.0 / (T_REF_C + 273.15)))
+        out.eta_liquid = self.eta_liquid * f
+        out.structural_factor = float(structural)
+        return out
 
     def phi_from_w(self, w):
         """Solids volume fraction from solids mass fraction w in [0, 1]."""
@@ -95,9 +128,14 @@ class SlurryRheology:
         return np.where(phi > self.phi_yield, tau, 0.0)
 
     def apparent_viscosity(self, phi, gamma_dot):
-        """Bingham apparent viscosity at shear rate gamma_dot (Pa.s)."""
+        """Bingham apparent viscosity at shear rate gamma_dot (Pa.s).
+
+        The structural (thixotropy) factor scales the whole flow curve; the
+        ETA_CAP still bounds the result for the solver.
+        """
         g = max(gamma_dot, GAMMA_MIN)
-        eta = self.eta_infinite(phi) + self.tau_yield(phi) / g
+        eta = (self.eta_infinite(phi) + self.tau_yield(phi) / g) \
+            * self.structural_factor
         return min(eta, ETA_CAP)
 
     def settling_velocity(self, phi):
@@ -350,6 +388,27 @@ class FluidGrid2D:
     def max_speed(self):
         return float(np.hypot(self.u, self.v).max())
 
+    def vortex_dip_m(self):
+        """Free-surface centre dip (m) from radial equilibrium, first order.
+
+        A swirling flow needs dh/dr = u_t^2/(g r); for the equivalent
+        solid-body core omega_eff = sum(u_t r)/sum(r^2) the wall-to-axis
+        level difference is omega_eff^2 R^2 / (2 g). Sign-free (squared) and
+        uncapped -- the caller clamps to the liquid depth. A noisy or
+        counter-rotating field averages toward zero dip: an honest readout,
+        not a hard threshold.
+        """
+        ang = np.arctan2(self.Y - self.cy, self.X - self.cx)
+        u_t = -np.sin(ang) * self.u + np.cos(ang) * self.v
+        r_m = self.rgrid * self.dx
+        sel = self.liquid & (r_m > 1.0e-6)
+        den = float((r_m[sel] ** 2).sum())
+        if den <= 0.0:
+            return 0.0
+        omega_eff = float((u_t[sel] * r_m[sel]).sum()) / den
+        R = self.radius_cells * self.dx
+        return omega_eff * omega_eff * R * R / (2.0 * GRAVITY)
+
 
 # ---------------------------------------------------------------------------
 # Stirrer (roerapparaat) with mains power draw
@@ -488,7 +547,8 @@ class MixingTank:
     """Cylindrical tank holding the slurry; owns solver, stirrer, meter."""
 
     def __init__(self, n=96, diameter=0.40, capacity_l=20.0,
-                 water_l=15.0, w_pct=20.0, rheo=None):
+                 water_l=15.0, w_pct=20.0, rheo=None,
+                 thermal=True, thixotropy=False):
         self.rheo = rheo or SlurryRheology()
         self.grid = FluidGrid2D(n=n, tank_diameter=diameter)
         self.stirrer = Stirrer()
@@ -506,6 +566,16 @@ class MixingTank:
         # no floor; in a ~16 cm deep tank the bottom layer spins the vortex
         # down in tens of seconds, which this linear drag stands in for.
         self.bottom_drag = 0.3
+        # --- thermal coupling: shaft work heats the slurry, the wall sheds
+        # it to the workshop; temperature feeds back via Arrhenius rheology.
+        self.thermal = thermal
+        self.temperature_c = T_REF_C
+        self.t_ambient_c = T_REF_C
+        self.wall_loss_w_per_k = UA_TANK_W_PER_K
+        # --- thixotropy (opt-in for level design): lambda 1 = fully built
+        # gel, 0 = fully broken down; ON shifts eta_app by up to (1 + C_THIX).
+        self.thix_on = thixotropy
+        self.struct_lambda = 1.0
         if w_pct > 0:
             self.set_composition(w_pct, instant=True)
 
@@ -608,12 +678,45 @@ class MixingTank:
         g.c *= np.clip(bias, 0.1, None)
         self._rescale_field()
 
+    # -- temperature & structure -------------------------------------------
+    def _structural(self):
+        """Flow-curve multiplier from the thixotropy state (1.0 when off)."""
+        return 1.0 + C_THIX * self.struct_lambda if self.thix_on else 1.0
+
+    def _update_structure(self, st, dt):
+        """Thixotropy kinetics: rebuild at rest, shear-driven breakdown.
+
+        dlambda/dt = (1 - lambda)/T_build - K_break * gamma_dot * lambda,
+        the classic rate equation with lambda in [0, 1].
+        """
+        n_rps = st.rpm_actual / 60.0
+        gamma = KS_METZNER_OTTO * n_rps if n_rps > 1.0e-4 else 0.0
+        dl = ((1.0 - self.struct_lambda) / T_BUILD_S
+              - K_BREAK * gamma * self.struct_lambda)
+        self.struct_lambda = min(max(self.struct_lambda + dl * dt, 0.0), 1.0)
+
+    def _thermal_step(self, dt, p_heat_w):
+        """0-D slurry energy balance: viscous shaft work in, wall loss out.
+
+        Only shaft power heats the fluid -- motor and standby losses stay in
+        the drive housing/air, as in reality. Wall loss is Newton cooling
+        with a lumped UA; realistic time constants are hours, so the bath
+        drifts, it does not jump.
+        """
+        m_kg = self.water_kg + self.slag_kg
+        if m_kg <= 1.0e-9:
+            return
+        cp = (self.water_kg * CP_WATER + self.slag_kg * CP_SLAG) / m_kg
+        q_loss = self.wall_loss_w_per_k * (self.temperature_c - self.t_ambient_c)
+        self.temperature_c += (p_heat_w - q_loss) / (m_kg * cp) * dt
+
     # -- simulation step ---------------------------------------------------
     def step(self, dt=1.0 / 30.0, mouse_splat=None):
         """Advance one frame. mouse_splat = (gx, gy, ux, uy) or None."""
         g = self.grid
         st = self.stirrer
-        rheo = self.rheo
+        rheo = self.rheo.at_conditions(self.temperature_c,
+                                       structural=self._structural())
         w = self.w()
         phi = self.phi_bulk()
         rho = rheo.rho_mix(w)
@@ -632,11 +735,17 @@ class MixingTank:
 
         if not self.placed:
             self.meter.add(st.p_standby if st.plugged_in else 0.0, dt)
+            if self.thermal:
+                self._thermal_step(dt, 0.0)
             self.time_s += dt
             return
 
         st.update(rho, rheo, phi, dt)
         self.meter.add(st.p_electric, dt)
+        if self.thix_on:
+            self._update_structure(st, dt)
+        if self.thermal:
+            self._thermal_step(dt, st.p_shaft)
         nu = st.eta_app / rho  # kinematic viscosity for the solver
 
         omega = st.rpm_actual / 60.0 * 2 * math.pi
@@ -672,10 +781,19 @@ class MixingTank:
     # -- reporting ---------------------------------------------------------
     def snapshot(self):
         st = self.stirrer
-        rheo = self.rheo
+        rheo = self.rheo.at_conditions(self.temperature_c,
+                                       structural=self._structural())
         w = self.w()
         phi = self.phi_bulk()
         vs = float(rheo.settling_velocity(phi))
+        depth = self.liquid_depth_m()
+        dip_raw = self.grid.vortex_dip_m()
+        # Gas entrainment: the visual field is speed-capped (u_cap), so the
+        # drawn dip alone can never reach the floor of a real bath. The flag
+        # therefore also uses the standard Froude vortex criterion Fr =
+        # N^2 D / g of the TRUE stirrer state (>1: deep vortex, air intake).
+        n_rps = st.rpm_actual / 60.0
+        fr = n_rps * n_rps * st.d / GRAVITY
         return {
             "time_s": self.time_s,
             "w_pct": w * 100.0,
@@ -698,4 +816,8 @@ class MixingTank:
             "tripped": st.tripped,
             "settling_mm_h": vs * 3.6e6,
             "settle_boost": self.settle_boost_active,
+            "temperature_c": self.temperature_c,
+            "thix_lambda": self.struct_lambda,
+            "vortex_dip_mm": min(dip_raw, depth) * 1000.0,
+            "air_entrainment": bool(dip_raw >= depth or fr > 1.0),
         }
