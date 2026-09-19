@@ -142,3 +142,22 @@ geen tweede fysica-stack.
 | `step(dt)` | live stroomdynamica + viscositeit in de rivier |
 | `deposit_at(fraction)` | zichtbare erts-ophoping (zandbank) |
 | `RawMaterialSupply.collect()` | mijnbouw-actie: erts → MolCoins |
+
+## Digital twin: thermisch model + CAD-brug (`cad_twin`)
+
+Brug tussen deze fysica-autoriteit en de 3D/CAD-wereld (Astra-apparatuur,
+SolidWorks-interoperabiliteit) — bewust dependency-arm:
+
+- **`ThermalTwin`** — transiënt axisymmetrisch (r, z) warmtemodel van de roerbak:
+  anisotroop FDM-rooster in de slurry, wand als per-hoogte weerstandsketen
+  (wandgeleiding + vrije luchtconvectie, of jacket-koeling over de mantelhoogte),
+  warmtebronnen op de fysisch juiste plek (impeller-sweep, 28/40 kHz-ring).
+  Bewaakte invarianten: energieboekhouding sluit, auto-substepping is
+  consistent, jacket trekt het evenwicht omlaag, en de handmatige
+  cilinderwand-formule komt uit het rooster terug.
+  `python3 test_cad_twin.py` (24 checks, exit 0 = pass).
+- **`export_step`** — OPTIONELE FreeCAD-brug: bouwt bak + jacket + roeras +
+  impeller + transducentring parametrisch en schrijft **STEP** (SolidWorks
+  opent dit native, en andersom importeert FreeCAD STEP uit SolidWorks).
+  `freecadcmd demo_cad_twin_step.py` — FreeCAD is níet nodig voor het
+  thermische model.
