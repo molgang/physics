@@ -95,6 +95,14 @@ class ViscosityApp:
         self.s_rpm.set(300)
         self.s_rpm.pack(anchor="w")
 
+        self.v_thx = tk.BooleanVar(value=False)
+        tk.Checkbutton(p, text="Thixotropie (structuurafbraak bij roeren)",
+                       variable=self.v_thx, command=self._toggle_thix,
+                       bg="#0b0e13", fg="#8fa2bd", activebackground="#0b0e13",
+                       activeforeground="#dbe6f5", selectcolor="#1a2333",
+                       highlightthickness=0, anchor="w").pack(anchor="w",
+                                                              pady=(4, 0))
+
         btns = tk.Frame(p, bg="#0b0e13")
         btns.pack(anchor="w", pady=8)
 
@@ -147,7 +155,8 @@ class ViscosityApp:
             ("rpm", "RPM werkelijk"), ("torque", "Koppel"),
             ("pshaft", "Vermogen as"), ("pel", "Vermogen stopcontact"),
             ("kwh", "kWh-meter"), ("mix", "Menggraad"),
-            ("settle", "Bezinksnelheid"), ("fps", "Sim FPS"),
+            ("settle", "Bezinksnelheid"), ("temp", "Temperatuur"),
+            ("vortex", "Vortex-trechter"), ("fps", "Sim FPS"),
         ]
         for i, (key, label) in enumerate(fields):
             self._lbl(grid, label, 9, "#8fa2bd").grid(row=i, column=0,
@@ -183,6 +192,9 @@ class ViscosityApp:
         st.on = not st.on
         self.b_on.config(text=f"Roerder: {'AAN' if st.on else 'UIT'}")
 
+    def _toggle_thix(self):
+        self.tank.thix_on = bool(self.v_thx.get())
+
     def _reset_trip(self):
         self.tank.stirrer.reset_trip()
 
@@ -199,6 +211,7 @@ class ViscosityApp:
         self.tank.set_composition(float(self.s_w.get()), instant=True)
         self.tank.settle_bottom()
         self.tank.stirrer.rpm_set = float(rpm)
+        self.v_thx.set(False)
         self.level = SiliconWashLevel(self.tank)
         self.b_28.config(text="28 kHz: uit")
         self.b_40.config(text="40 kHz: uit")
@@ -329,6 +342,12 @@ class ViscosityApp:
                              f"(€ {snap['cost_eur']:.4f})")
         r["mix"].config(text=f"{snap['mixedness_pct']:.0f} %")
         r["settle"].config(text=f"{snap['settling_mm_h']:.1f} mm/h")
+        r["temp"].config(text=f"{snap['temperature_c']:.1f} °C"
+                              f"  λ={snap['thix_lambda']:.2f}")
+        vtx = f"{snap['vortex_dip_mm']:.1f} mm"
+        if snap["air_entrainment"]:
+            vtx += "  ⚠ lucht inslag"
+        r["vortex"].config(text=vtx)
         r["fps"].config(text=f"{self._fps:.0f}")
         if snap["tripped"]:
             self.status.config(text="⚡ ZEKERING ERUIT — druk Reset zekering",

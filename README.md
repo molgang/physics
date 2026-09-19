@@ -15,7 +15,7 @@ referentie-implementatie waar de 3D/AR-versie (Meta Quest 3S
 ```
 python3 viscosity_gui.py          # GUI (slider slib-%, roerintensiteit)
 python3 viscosity_gui.py 64       # kleiner grid = hogere FPS
-python3 test_viscosity_core.py    # proof-suite (47 checks, exit 0 = pass)
+python3 test_viscosity_core.py    # proof-suite (69 checks, exit 0 = pass)
 python3 demo_headless.py          # PNG/GIF/JSON bewijs zonder GUI
 python3 smoke_gui.py              # 4 s zelfsluitende GUI-smoketest
 ```
@@ -59,6 +59,23 @@ De impliciete (Gauss-Seidel) diffusie is onvoorwaardelijk stabiel, zodat
   gespiegelde drukgradiënt), massa-conservatieve slib-advectie
   (renormalisatie, packing-cap 0,62), 2-blads impellerforcering met
   CFL-substeps.
+- **Temperatuur (0-D warmtebalans):** as-vermogen dissipeert als viskeuze
+  warmte in de slurry (motorverliezen blijven in de behuizing), wandverlies
+  is Newton-koeling (UA ≈ 2,3 W/K). Temperatuur terugkoppelt via een
+  Arrhenius-wet op de vloeistofviscositeit (E/R = 2400 K, verankerd op
+  20 °C): warme slurry is dunner en bezinkt sneller; tijdconstanten zijn
+  realistisch uren, de bad drift dus, hij springt niet.
+- **Thixotropie (opt-in, `MixingTank(thixotropy=True)`):**
+  structuurparameter λ ∈ [0,1] met dλ/dt = (1−λ)/τ_b − k_b·γ̇·λ
+  (τ_b = 45 s); een opgebouwd gel vermenigvuldigt de héle vloeikurve met
+  (1 + C_thix·λ), C_thix = 0,8. Off by default: het cavitatie-η-venster
+  van level 1 verschuift niet (parity bewaakt met een bit-exacte check).
+- **Vortex-trechter:** centrale dip uit het werkelijke snelheidsveld via
+  radiaal evenwicht (ω_eff² R²/2g, ω_eff = Σu_t·r/Σr²), afgekapt op de
+  vloeistofdiepte. `air_entrainment` gebruikt óók het Froude-criterium
+  Fr = N²D/g van de échte roertoestand (> 1 ⇒ lucht inslag), want de
+  visuele veldsnelheid is op u_cap gebonden en kan een echte trechter
+  alleen onderschatten.
 
 Bekende beperking: collocated 2dx-stencils zien checkerboard-divergentie
 niet (standaard Stam-artefact); irrelevant voor gladde velden, zie test 2.
@@ -99,6 +116,9 @@ Si-rijke lichte fractie (15% van de vaste stof) uit het slib laten
 | `stirrer.rpm_set` → `rpm_actual` | roerintensiteit, droop bij dik slib |
 | `PowerMeter` (`p_watt`, `energy_kwh`) | kW-meting aan het stopcontact |
 | `grid.c` (φ-veld) + `u,v` | 3D-textuur/particles van het mengsel |
+| `tank.temperature_c` | thermometer op de bakwand + dunner-worden bij warmte |
+| `snapshot().vortex_dip_mm` / `air_entrainment` | zichtbare trechter in de vloeispiegel; waarschuwing bij lucht inslag |
+| `tank.thix_on` / `struct_lambda` | schakelaar "thixotroop slib": rust herstelt de dikte |
 | `snapshot()` | HUD-readouts (η, Re, regime, menggraad …) |
 
 De proof-suite (`test_viscosity_core.py`) is het parity-contract voor de

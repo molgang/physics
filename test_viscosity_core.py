@@ -10,8 +10,9 @@ import sys
 
 import numpy as np
 
-from viscosity_core import (FluidGrid2D, MixingTank, SlurryRheology, Stirrer, PHI_MAX,
-                            PHI_PACK_BED, RHO_SLAG, RHO_WATER)
+from viscosity_core import (FluidGrid2D, MixingTank, SlurryRheology, Stirrer,
+                            C_THIX, CP_SLAG, CP_WATER, PHI_MAX,
+                            PHI_PACK_BED, RHO_SLAG, RHO_WATER, T_REF_C)
 
 failures = 0
 
@@ -241,6 +242,108 @@ check(com1 > com0 + 0.5,
       f"solids settle when idle (centroid row {com0:.1f} -> {com1:.1f})")
 check(float(t3.grid.c.max()) <= PHI_PACK_BED + 1e-9,
       "sediment respects packed-bed cap")
+
+print("\n9. Thermal coupling: heat thins, stirring warms, the wall sheds")
+rh40 = rh.at_conditions(40.0)
+rh5 = rh.at_conditions(5.0)
+rh20 = rh.at_conditions(20.0)
+f40 = rh40.eta_liquid / rh.eta_liquid
+f5 = rh5.eta_liquid / rh.eta_liquid
+check(rh20.eta_liquid == rh.eta_liquid, "at 20 C the rheology tables are exact")
+check(0.4 < f40 < 0.8,
+      f"Arrhenius: 40 C thins the liquid phase (x{f40:.2f}, water ~0.6)")
+check(1.3 < f5 < 2.0, f"5 C thickens the liquid phase (x{f5:.2f})")
+check(rh40.settling_velocity(0.10) > rh.settling_velocity(0.10),
+      "warm slurry settles faster (Stokes over eta_liquid)")
+t4 = MixingTank(n=48, water_l=14.0, w_pct=20.0)
+t4.stirrer.plugged_in = True
+t4.stirrer.on = True
+t4.stirrer.rpm_set = 300.0
+T0 = t4.temperature_c
+q_in = q_out = 0.0
+for _ in range(1200):            # 120 s of stirring
+    q_in += t4.stirrer.p_shaft * 0.1
+    q_out += t4.wall_loss_w_per_k * (t4.temperature_c - t4.t_ambient_c) * 0.1
+    t4.step(0.1)
+m_kg = t4.water_kg + t4.slag_kg
+cp = (t4.water_kg * CP_WATER + t4.slag_kg * CP_SLAG) / m_kg
+dT = t4.temperature_c - T0
+check(dT > 0.005, f"stirring heats the slurry (dT = {dT * 1000:.0f} mK/120 s)")
+resid = abs(q_in - q_out - m_kg * cp * dT) / max(q_in, 1.0)
+check(resid < 0.01, f"0-D heat balance closes (residual {resid:.4f})")
+t5 = MixingTank(n=48, water_l=10.0, w_pct=0.0)
+q = 0.0
+for _ in range(120):             # calibrated pulse: 60 s at 1000 W
+    t5._thermal_step(0.5, 1000.0)
+    q += 1000.0 * 0.5
+dT_pulse = t5.temperature_c - T_REF_C
+check(abs(dT_pulse - q / (t5.water_kg * CP_WATER)) < 0.01 * dT_pulse,
+      f"heat pulse matches hand calculation (dT = {dT_pulse:.3f} K)")
+t5.temperature_c = 60.0
+for _ in range(600):             # 600 s idle at the wall
+    t5.step(1.0)
+drop = 60.0 - t5.temperature_c
+check(0.3 < drop < 1.5 and t5.temperature_c > t5.t_ambient_c,
+      f"idle bath cools toward ambient (−{drop:.2f} K in 600 s)")
+
+print("\n10. Thixotropy: shear breaks the gel, rest rebuilds it (opt-in)")
+t6 = MixingTank(n=48, water_l=12.0, w_pct=35.0, thixotropy=True)
+check(t6.struct_lambda == 1.0, "fresh slurry fully built (lambda = 1)")
+t6.stirrer.plugged_in = True
+t6.stirrer.on = True
+t6.stirrer.rpm_set = 400.0
+for _ in range(1800):            # 60 s at 400 rpm
+    t6.step(1 / 30)
+lam_broken = t6.struct_lambda
+check(0.05 < lam_broken < 0.45,
+      f"60 s @400 rpm breaks the gel (lambda = {lam_broken:.2f})")
+t6.stirrer.on = False
+for _ in range(3600):            # 120 s at rest
+    t6.step(1 / 30)
+check(t6.struct_lambda > lam_broken + 0.5,
+      f"rest rebuilds the structure (lambda = {t6.struct_lambda:.2f})")
+check(0.0 <= t6.struct_lambda <= 1.0, "lambda stays bounded in [0, 1]")
+sur = rh.at_conditions(20.0, structural=1.0 + C_THIX)
+check(abs(sur.apparent_viscosity(0.30, 50.0)
+          - (1.0 + C_THIX) * rh.apparent_viscosity(0.30, 50.0)) < 1e-12,
+      "built gel scales the whole flow curve by (1 + C_thix)")
+t7 = MixingTank(n=48, water_l=12.0, w_pct=35.0)   # thixotropy OFF (default)
+t7.stirrer.plugged_in = True
+t7.stirrer.on = True
+t7.stirrer.rpm_set = 300.0
+t7.step(1 / 30)
+classic = rh.apparent_viscosity(t7.phi_bulk(), 11.0 * t7.stirrer.rpm_set / 60.0)
+check(t7.stirrer.eta_app == classic,
+      "thixotropy off: eta_app matches the classic tables exactly")
+
+print("\n11. Vortex dip (free surface) and air entrainment flag")
+
+
+def dip_after(rpm, frames=300):
+    tv = MixingTank(n=64, water_l=14.0, w_pct=20.0)
+    tv.stirrer.plugged_in = True
+    tv.stirrer.on = True
+    tv.stirrer.rpm_set = rpm
+    for _ in range(frames):      # 10 s spin-up
+        tv.step(1 / 30)
+    return tv
+
+
+tq = dip_after(0.0)
+check(tq.grid.vortex_dip_m() < 1.0e-4, "quiescent bath: no vortex (<0.1 mm)")
+d150 = dip_after(150.0).grid.vortex_dip_m()
+d300 = dip_after(300.0).grid.vortex_dip_m()
+d600 = dip_after(600.0).grid.vortex_dip_m()
+check(0.0 < d150 < d300 < d600,
+      f"dip grows with swirl ({d150 * 1e3:.1f} < {d300 * 1e3:.1f} "
+      f"< {d600 * 1e3:.1f} mm)")
+depth_mm = tq.liquid_depth_m() * 1000.0
+snap600 = dip_after(600.0).snapshot()
+check(snap600["vortex_dip_mm"] <= depth_mm + 1e-9,
+      f"dip readout capped at liquid depth ({depth_mm:.0f} mm)")
+check(snap600["air_entrainment"], "600 rpm: Fr > 1 -> air entrainment flagged")
+snap150 = dip_after(150.0).snapshot()
+check(not snap150["air_entrainment"], "150 rpm: gentle stirring pulls no air")
 
 print(f"\n=== {'ALL CHECKS PASSED' if failures == 0 else f'{failures} FAILURES'} ===\n")
 sys.exit(1 if failures else 0)
