@@ -16,7 +16,7 @@
     "p_electric_w": 23.2578,
     "energy_kwh": 0.0001,
     "cost_eur": 0.0,
-    "mixedness_pct": 85.4753,
+    "mixedness_pct": 85.4719,
     "overload": false,
     "tripped": false,
     "settling_mm_h": 101.3769,
@@ -25,7 +25,9 @@
     "thix_lambda": 1.0,
     "vortex_dip_mm": 2.2329,
     "air_entrainment": false,
-    "sim_fps": 34.4192
+    "water_kg": 14.0,
+    "evap_rate_kg_h": 0.0,
+    "sim_fps": 29.3804
   },
   "60pct": {
     "time_s": 12.0333,
@@ -44,7 +46,7 @@
     "p_electric_w": 34.1131,
     "energy_kwh": 0.0001,
     "cost_eur": 0.0,
-    "mixedness_pct": 85.6272,
+    "mixedness_pct": 85.6247,
     "overload": false,
     "tripped": false,
     "settling_mm_h": 8.7421,
@@ -53,7 +55,9 @@
     "thix_lambda": 1.0,
     "vortex_dip_mm": 2.2357,
     "air_entrainment": false,
-    "sim_fps": 34.5779
+    "water_kg": 13.8776,
+    "evap_rate_kg_h": 0.0,
+    "sim_fps": 33.829
   },
   "88pct": {
     "time_s": 12.0333,
@@ -81,6 +85,8 @@
     "thix_lambda": 1.0,
     "vortex_dip_mm": 0.0,
     "air_entrainment": false,
-    "sim_fps": 1485.3495
+    "water_kg": 6.3354,
+    "evap_rate_kg_h": 0.0,
+    "sim_fps": 1504.3888
   }
 }
