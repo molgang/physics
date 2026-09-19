@@ -15,7 +15,7 @@ referentie-implementatie waar de 3D/AR-versie (Meta Quest 3S
 ```
 python3 viscosity_gui.py          # GUI (slider slib-%, roerintensiteit)
 python3 viscosity_gui.py 64       # kleiner grid = hogere FPS
-python3 test_viscosity_core.py    # proof-suite (69 checks, exit 0 = pass)
+python3 test_viscosity_core.py    # proof-suite (83 checks, exit 0 = pass)
 python3 demo_headless.py          # PNG/GIF/JSON bewijs zonder GUI
 python3 smoke_gui.py              # 4 s zelfsluitende GUI-smoketest
 ```
@@ -76,6 +76,17 @@ De impliciete (Gauss-Seidel) diffusie is onvoorwaardelijk stabiel, zodat
   Fr = N²D/g van de échte roertoestand (> 1 ⇒ lucht inslag), want de
   visuele veldsnelheid is op u_cap gebonden en kan een echte trechter
   alleen onderschatten.
+- **Heropwerveling:** de tegenpool van bezinken. Boven een kritische
+  stroomsnelheid (u_crit = 0,08 m/s) erodeert de schuif de geconcentreerde
+  bodemlaag terug omhoog (CFL-gelimiteerde opwaartse flux, packing-cap op
+  de ontvangende cel); eronder is het veld exact onaangeroerd.
+- **Verdamping (opt-in, `MixingTank(evaporation=True)`, volgt de
+  `thermal`-schakelaar):** open bad verliest zuiver water op het
+  dampdrukdeficit tegen de werkplaatslucht (Magnus, 50% RV, natuurlijke-
+  convectie massa-overdracht h_m = 0,007 m/s). De latente warmte
+  (2,45 MJ/kg) gaat uit de balans — een heet bad koelt door verdamping
+  aantoonbaar harder dan door de wand — en waterverlies dikkt de slurry
+  op via de gewone boekhouding (massabalans blijft gesloten).
 
 Bekende beperking: collocated 2dx-stencils zien checkerboard-divergentie
 niet (standaard Stam-artefact); irrelevant voor gladde velden, zie test 2.
@@ -119,6 +130,7 @@ Si-rijke lichte fractie (15% van de vaste stof) uit het slib laten
 | `tank.temperature_c` | thermometer op de bakwand + dunner-worden bij warmte |
 | `snapshot().vortex_dip_mm` / `air_entrainment` | zichtbare trechter in de vloeispiegel; waarschuwing bij lucht inslag |
 | `tank.thix_on` / `struct_lambda` | schakelaar "thixotroop slib": rust herstelt de dikte |
+| `tank.evaporation` / `snapshot().evap_rate_kg_h` | open deksel: zichtbare damp + langzaam dikker worden |
 | `snapshot()` | HUD-readouts (η, Re, regime, menggraad …) |
 
 De proof-suite (`test_viscosity_core.py`) is het parity-contract voor de

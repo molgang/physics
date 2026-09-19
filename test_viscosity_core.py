@@ -12,7 +12,8 @@ import numpy as np
 
 from viscosity_core import (FluidGrid2D, MixingTank, SlurryRheology, Stirrer,
                             C_THIX, CP_SLAG, CP_WATER, PHI_MAX,
-                            PHI_PACK_BED, RHO_SLAG, RHO_WATER, T_REF_C)
+                            PHI_PACK_BED, RHO_SLAG, RHO_WATER, T_REF_C,
+                            rho_vapor_sat)
 
 failures = 0
 
@@ -344,6 +345,78 @@ check(snap600["vortex_dip_mm"] <= depth_mm + 1e-9,
 check(snap600["air_entrainment"], "600 rpm: Fr > 1 -> air entrainment flagged")
 snap150 = dip_after(150.0).snapshot()
 check(not snap150["air_entrainment"], "150 rpm: gentle stirring pulls no air")
+
+print("\n12. Verdamping: open bad verliest water, latente warmte koelt")
+check(abs(rho_vapor_sat(20.0) - 0.0173) < 0.05 * 0.0173,
+      f"Magnus: rho_sat(20 C) = {rho_vapor_sat(20.0):.4f} kg/m3 (~0.0173)")
+check(rho_vapor_sat(60.0) > rho_vapor_sat(40.0) > rho_vapor_sat(20.0),
+      "saturated vapour density monotone in temperature")
+t8 = MixingTank(n=48, water_l=14.0, w_pct=20.0)   # evaporation OFF (default)
+t8.temperature_c = 60.0
+w0 = t8.water_kg
+for _ in range(600):
+    t8.step(1.0)
+check(t8.water_kg == w0,
+      "evaporation off (default): water mass exact over 600 s")
+t9 = MixingTank(n=48, water_l=14.0, w_pct=20.0, evaporation=True)
+w0 = t9.water_kg
+for _ in range(600):             # 600 s at bath = ambient temperature
+    t9.step(1.0)
+check(w0 - t9.water_kg > 0.003,
+      f"20 C bath still evaporates (deficit vs 50% RV: "
+      f"{(w0 - t9.water_kg) * 1000:.1f} g in 600 s)")
+t10 = MixingTank(n=48, water_l=14.0, w_pct=20.0, evaporation=True)
+tc10 = MixingTank(n=48, water_l=14.0, w_pct=20.0)   # dry twin, same heat
+t10.temperature_c = tc10.temperature_c = 60.0
+w_start = t10.water_kg
+w_start_pct = t10.w()
+for _ in range(600):
+    t10.step(1.0)
+    tc10.step(1.0)
+check(w_start - t10.water_kg > 0.05,
+      f"60 C bath evaporates visibly ({(w_start - t10.water_kg) * 1000:.0f} g "
+      f"in 600 s)")
+check(t10.w() > w_start_pct,
+      f"water loss thickens the slurry (w {w_start_pct * 100:.2f} -> "
+      f"{t10.w() * 100:.3f} %)")
+check(abs(t10.evaporated_kg - (w_start - t10.water_kg)) < 1e-9,
+      "evaporation bookkeeping closes (exact to float rounding)")
+check(t10.temperature_c < tc10.temperature_c - 0.5
+      and t10.temperature_c > t10.t_ambient_c,
+      f"latent heat cools harder ({t10.temperature_c:.2f} vs dry twin "
+      f"{tc10.temperature_c:.2f} C)")
+field_kg = t10.grid.total_phi() / t10._phi_per_kg()
+check(approx(field_kg, t10.slag_kg, 0.05 * max(t10.slag_kg, 1.0)),
+      f"field rescaled to new depth: {field_kg:.2f} ~ {t10.slag_kg:.2f} kg")
+
+print("\n13. Heropwerveling: snelheid boven u_crit wervelt de bodem omhoog")
+gb = FluidGrid2D(n=64, tank_diameter=0.40)
+bed = gb.liquid & (gb.Y > gb.cy + 15)
+above = gb.liquid & (gb.Y <= gb.cy + 15)
+gb.c[bed] = 0.5
+tot0 = gb.total_phi()
+bed0 = float(gb.c[bed].mean())
+above0 = float(gb.c[above].sum())
+gb.u[gb.liquid] = 0.2            # welk richting: |u| telt
+for _ in range(300):             # 10 s boven de erosiedrempel
+    gb.resuspend(1 / 30)
+check(float(gb.c[bed].mean()) < bed0 - 0.05,
+      f"bed erodes under shear (mean {bed0:.3f} -> {gb.c[bed].mean():.3f})")
+check(float(gb.c[above].sum()) > above0 + 0.5,
+      "eroded material moved into the column above the bed")
+check(approx(gb.total_phi(), tot0, tot0 * 1e-3),
+      f"erosion conserves mass ({tot0:.1f} -> {gb.total_phi():.1f})")
+check(float(gb.c.max()) <= PHI_PACK_BED + 1e-9,
+      "erosion respects the packed-bed cap")
+gb2 = FluidGrid2D(n=64, tank_diameter=0.40)
+bed2 = gb2.liquid & (gb2.Y > gb2.cy + 15)
+gb2.c[bed2] = 0.5
+gb2.u[gb2.liquid] = 0.03         # onder de drempel
+before = gb2.c.copy()
+for _ in range(300):
+    gb2.resuspend(1 / 30)
+check(np.array_equal(gb2.c, before),
+      "below u_crit the bed is exactly untouched")
 
 print(f"\n=== {'ALL CHECKS PASSED' if failures == 0 else f'{failures} FAILURES'} ===\n")
 sys.exit(1 if failures else 0)

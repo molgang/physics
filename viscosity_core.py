@@ -58,6 +58,22 @@ C_THIX = 0.8              # max relative viscosity surplus at fully built gel
 T_BUILD_S = 45.0          # s, structural rebuild time constant at rest
 K_BREAK = 1.15e-3         # (1/s) per 1/s shear; lambda* ~ 0.15 at 300 rpm
 
+# --- evaporation (open-bath water loss, opt-in, part of the 0-D balance) ----
+RH_AIR = 0.5              # workshop air, relative humidity (-)
+H_MASS = 0.007            # m/s, natural-convection mass transfer coefficient
+R_VAPOR = 461.5           # J/kg/K, specific gas constant of water vapour
+LATENT_VAP = 2.45e6       # J/kg, latent heat of vaporisation ~40 C
+
+# --- bed erosion (re-suspension of the settled layer under shear) -----------
+U_ERODE_CRIT = 0.08       # m/s, critical speed above which the bed erodes
+K_ERODE = 2.0             # 1/(s m/s), erosion rate above the threshold
+
+
+def rho_vapor_sat(t_c):
+    """Saturated water vapour density (kg/m3) via the Magnus formula."""
+    p = 610.94 * math.exp(17.625 * t_c / (t_c + 243.04))   # Pa
+    return p / (R_VAPOR * (t_c + 273.15))
+
 
 # ---------------------------------------------------------------------------
 # Rheology of the slag/water mixture
@@ -355,6 +371,25 @@ class FluidGrid2D:
         self.c -= flux
         self.c[1:, :] += flux[:-1, :]
 
+    def resuspend(self, dt, u_crit=U_ERODE_CRIT, k_ero=K_ERODE):
+        """Bed erosion: the upward mirror of settle().
+
+        Above the critical speed the shear carries material from the
+        concentrated layer back up (CFL-limited upward flux, packed-bed
+        cap on the receiving cell). Below u_crit the field is untouched --
+        a uniform suspension shifts as a whole, only gradients (beds) erode.
+        """
+        speed = np.hypot(self.u, self.v)
+        f = np.clip(k_ero * np.maximum(speed - u_crit, 0.0) * dt, 0.0, 0.45)
+        flux = self.c * f
+        room = np.zeros_like(self.c)
+        room[1:, :] = np.maximum(0.0, PHI_PACK_BED - self.c[:-1, :])
+        both = np.zeros_like(self.c, dtype=bool)
+        both[1:, :] = self.liquid[1:, :] & self.liquid[:-1, :]
+        flux = np.where(both, np.minimum(flux, room), 0.0)
+        self.c -= flux
+        self.c[:-1, :] += flux[1:, :]
+
     def add_solids_blob(self, phi_amount, gx, gy, sigma=3.0):
         """Inject phi_amount (sum over cells) as a gaussian blob; returns
         the part that did not fit (local packing cap)."""
@@ -548,7 +583,7 @@ class MixingTank:
 
     def __init__(self, n=96, diameter=0.40, capacity_l=20.0,
                  water_l=15.0, w_pct=20.0, rheo=None,
-                 thermal=True, thixotropy=False):
+                 thermal=True, thixotropy=False, evaporation=False):
         self.rheo = rheo or SlurryRheology()
         self.grid = FluidGrid2D(n=n, tank_diameter=diameter)
         self.stirrer = Stirrer()
@@ -576,6 +611,11 @@ class MixingTank:
         # gel, 0 = fully broken down; ON shifts eta_app by up to (1 + C_THIX).
         self.thix_on = thixotropy
         self.struct_lambda = 1.0
+        # --- evaporation (open-bath water loss; lives inside the 0-D bath
+        # balance below, so it follows the `thermal` switch).
+        self.evaporation = evaporation
+        self.evaporated_kg = 0.0
+        self.evap_rate_kg_s = 0.0
         if w_pct > 0:
             self.set_composition(w_pct, instant=True)
 
@@ -696,19 +736,37 @@ class MixingTank:
         self.struct_lambda = min(max(self.struct_lambda + dl * dt, 0.0), 1.0)
 
     def _thermal_step(self, dt, p_heat_w):
-        """0-D slurry energy balance: viscous shaft work in, wall loss out.
+        """0-D bath balance: viscous shaft work in; wall loss, evaporation
+        (mass + latent heat) out.
 
         Only shaft power heats the fluid -- motor and standby losses stay in
         the drive housing/air, as in reality. Wall loss is Newton cooling
         with a lumped UA; realistic time constants are hours, so the bath
-        drifts, it does not jump.
+        drifts, it does not jump. Evaporation runs on the vapour-pressure
+        deficit against the workshop air and thickens the slurry as pure
+        water leaves (the field is rescaled to the new depth).
         """
         m_kg = self.water_kg + self.slag_kg
         if m_kg <= 1.0e-9:
             return
-        cp = (self.water_kg * CP_WATER + self.slag_kg * CP_SLAG) / m_kg
-        q_loss = self.wall_loss_w_per_k * (self.temperature_c - self.t_ambient_c)
-        self.temperature_c += (p_heat_w - q_loss) / (m_kg * cp) * dt
+        q_loss = self.wall_loss_w_per_k * (self.temperature_c
+                                           - self.t_ambient_c)
+        if self.evaporation and self.water_kg > 0.0:
+            area = math.pi * (self.grid.diameter / 2.0) ** 2
+            deficit = max(rho_vapor_sat(self.temperature_c)
+                          - RH_AIR * rho_vapor_sat(self.t_ambient_c), 0.0)
+            take = min(area * H_MASS * deficit * dt, self.water_kg)
+            self.water_kg -= take
+            self.evaporated_kg += take
+            self.evap_rate_kg_s = take / dt
+            q_loss += take / dt * LATENT_VAP
+            self._rescale_field()
+        else:
+            self.evap_rate_kg_s = 0.0
+        cp = (self.water_kg * CP_WATER + self.slag_kg * CP_SLAG) \
+            / max(self.water_kg + self.slag_kg, 1.0e-9)
+        self.temperature_c += (p_heat_w - q_loss) \
+            / max(self.water_kg + self.slag_kg, 1.0e-9) / cp * dt
 
     # -- simulation step ---------------------------------------------------
     def step(self, dt=1.0 / 30.0, mouse_splat=None):
@@ -769,6 +827,8 @@ class MixingTank:
             g.u *= drag
             g.v *= drag
             g.advect_solids(dt)
+            if g.max_speed() > U_ERODE_CRIT:
+                g.resuspend(dt)          # roeren wervelt de bodem er weer in
 
         # Settling: time-lapse only when the fluid is quiescent.
         quiescent = (not stirring) and g.max_speed() < 0.05
@@ -820,4 +880,6 @@ class MixingTank:
             "thix_lambda": self.struct_lambda,
             "vortex_dip_mm": min(dip_raw, depth) * 1000.0,
             "air_entrainment": bool(dip_raw >= depth or fr > 1.0),
+            "water_kg": self.water_kg,
+            "evap_rate_kg_h": self.evap_rate_kg_s * 3600.0,
         }
