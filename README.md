@@ -18,6 +18,8 @@ python3 viscosity_gui.py 64       # kleiner grid = hogere FPS
 python3 test_viscosity_core.py    # proof-suite (83 checks, exit 0 = pass)
 python3 demo_headless.py          # PNG/GIF/JSON bewijs zonder GUI
 python3 smoke_gui.py              # 4 s zelfsluitende GUI-smoketest
+python3 test_downstream.py        # neerstroom-suite (46 checks, exit 0 = pass)
+python3 -c "import downstream; downstream.print_cases()"  # staalslak-cases
 ```
 
 ## Vooronderzoek: bestaande GitHub-packages
@@ -193,3 +195,45 @@ SolidWorks-interoperabiliteit) — bewust dependency-arm:
   opent dit native, en andersom importeert FreeCAD STEP uit SolidWorks).
   `freecadcmd demo_cad_twin_step.py` — FreeCAD is níet nodig voor het
   thermische model.
+
+## Neerstroom-keten: van slurry naar product (`downstream.py`)
+
+`downstream.py` + `test_downstream.py` (46 checks). Eerste-orde modellen met
+echte constanten voor alles ná het roeren/bezinken — de route van staalslak
+naar verkoopbaar product:
+
+- **Vacuumfiltratie (`VacuumFiltration`):** Darcy constante-druk in de
+  klassieke t/V-vorm, t = K₁V² + K₂V (koeksweerstand α ≈ 5·10¹⁰ m/kg voor
+  slib-fijn, mediumweerstand, √-machtsregel voor restvocht tegen de drukval).
+  5 m³ slib op 25 m² kamerfilterplaat ≈ 1 uur.
+- **Centrifuge (`BasketCentrifuge`):** batch-basket vanaf 5 L. G-kracht,
+  radiale Stokes-bed-tijd (5 µm slak zit er bij 3000 rpm in ~2 s aan de
+  wand), Ambler-Σ voor continue-doorzet-vergelijking, en **centrifugedroging**:
+  restvocht M(t) = M∞ + (M₀−M∞)e^(−t/τ) met M∞ ~ G^−0,35 en τ ~ G^−0,5.
+  Vacuumfilter-koek (55% vocht) droogt in 10 min naar ~7% op 1200 g.
+- **Nafion 117 (`Nafion117`):** 178 µm, ASR = δ/σ, V-doorslag, degradatie
+  (exponeel in T, V(V)-oxideert de zijketen). Vervangstrategieën zijn
+  expliciet: **dubbel nafion** (lagen in serie: 2× ASR, ½ doorslag,
+  1,6× levensduur) of **teflon (PTFE)-rugversterking** (1,15× ASR, 2×
+  levensduur, tussentijds vervangbaar in 2 h in plaats van 12 h).
+- **Electrolyse (`ElectrolysisCell`):** Faraday-productie plus celspanning
+  U = E_eq + η_over + i·ASR (het membraan zit letterlijk in de formule) →
+  kWh/kg. Orde: ~0,7 kWh/kg V bij 400 A/m².
+- **Electrodialyse (`ElectrodialysisStack`):** ionverwijdering per lading
+  over n celparen, grensstroombewaker, kWh/m³ (brakwater-orde ~9 kWh/m³
+  voor 5,8 → 0,6 g/L).
+- **Opschaling (`ProductionScale`):** van labbatch naar tonnen/dag met
+  membraanvervangplan per strategie (vervangingen/jaar, downtime,
+  membraankosten, beschikbaarheid).
+
+### Voorbeeldcases met staalslak (`downstream.print_cases()`)
+
+1. **V2O5-terugwinning uit 1 t BOF-slak** (8 massa-% V2O5): 5 m³ slurry
+   filteren (~1 h), electrolyseren naar V-electrolyt ≈ 0,7 kWh/kg V,
+   ~430 L VRFB-electrolyt van 1 t slak ≈ 1,5 MWh opslagwaarde.
+2. **5 L labbatch centrifugedroging** (3000 rpm, 1207 g): 1,5 kg slibresidu
+   van het ultrasound-level, cyclus ~13 min, koek droogt van 55% naar 7%
+   vocht.
+3. **Opschaling naar 5 t slak/dag**: 5 electrolyse-lijnen; membraanvergelijk
+   per jaar — dubbel nafion: halve doorslag, +1,4% energie, 8 h stilstand;
+   teflon-rug: 2× levensduur, 1,1 h stilstand/jaar, laagste kosten.
