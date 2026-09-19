@@ -9,10 +9,15 @@ Public API (pure Python + numpy; GUI is tkinter, stdlib):
 """
 
 from .cad_twin import EquipmentSpec, ThermalTwin
+from .downstream import (BasketCentrifuge, ElectrodialysisStack,
+                         ElectrolysisCell, Nafion117, ProductionScale,
+                         VacuumFiltration, steel_slag_cases)
 from .ultrasound import SiliconWashLevel, UltrasoundBath
 from .viscosity_core import (FluidGrid2D, MixingTank, PowerMeter,
                              SlurryRheology, Stirrer)
 
-__all__ = ["EquipmentSpec", "FluidGrid2D", "MixingTank", "PowerMeter",
-           "SiliconWashLevel", "SlurryRheology", "Stirrer", "ThermalTwin",
-           "UltrasoundBath"]
+__all__ = ["BasketCentrifuge", "ElectrodialysisStack", "ElectrolysisCell",
+           "EquipmentSpec", "FluidGrid2D", "MixingTank", "Nafion117",
+           "PowerMeter", "ProductionScale", "SiliconWashLevel",
+           "SlurryRheology", "Stirrer", "ThermalTwin", "UltrasoundBath",
+           "VacuumFiltration", "steel_slag_cases"]
